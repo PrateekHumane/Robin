@@ -33,6 +33,7 @@ from robin.train.llava_trainer import LLaVATrainer
 
 from robin import conversation as conversation_lib
 from robin.model import LlavaMistralForCausalLM, LlavaGPTNeoXForCausalLM, LlavaLlamaForCausalLM#, LlavaMPTForCausalLM [TODO] mpt is commented out at robin.model.__init__
+from robin.model.multimodal_model.multimodal_model import MultiModalModel, MultiModalConfig
 from robin.model.builder import LlavaMetaModel
 from robin.mm_utils import tokenizer_image_token, expand2square
 
@@ -807,48 +808,33 @@ def train(USE_FLASH_ATTN_2=False):
 
     # TODO: model_args.vision_tower could be None. Should I require it?
 
+
     rank0_print("Loading model of type:", end=' ')
-    # if llm_type == LlavaMetaModel.ModelType.LlavaMPTModel:
-    #     rank0_print("MPT")
-    #     config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
-    #     config.attn_config['attn_impl'] = training_args.mpt_attn_impl
-    #     model = LlavaMPTForCausalLM.from_pretrained(
-    #         model_args.model_name_or_path,
-    #         config=config,
-    #         cache_dir=training_args.cache_dir,
-    #         **bnb_model_from_pretrained_args
-    #     )
-    if llm_type == LlavaMetaModel.ModelType.LlavaMistralModel:
-        rank0_print("Mistral")
-        model = LlavaMistralForCausalLM.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            use_flash_attention_2 = USE_FLASH_ATTN_2,
-            **bnb_model_from_pretrained_args
-        )
-    elif llm_type == LlavaMetaModel.ModelType.LlavaGPTNeoXModel:
-        rank0_print("NeoX")
-        model = LlavaGPTNeoXForCausalLM.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            use_flash_attention_2 = USE_FLASH_ATTN_2, # The current architecture does not support Flash Attention 2.0
-            **bnb_model_from_pretrained_args
-        )
-    elif llm_type == LlavaMetaModel.ModelType.LlavaLlamaModel:
-        rank0_print("Llama")
-        model = LlavaLlamaForCausalLM.from_pretrained(
-            model_args.model_name_or_path,
-            cache_dir=training_args.cache_dir,
-            **bnb_model_from_pretrained_args,
-            use_flash_attention_2 = USE_FLASH_ATTN_2,
-        )
-    else:
-        raise NotImplementedError
 
-    model.config.use_cache = False
+    llm_config_args = {'cache_dir':training_args.cache_dir,
+            'use_flash_attention_2': USE_FLASH_ATTN_2,
+            **bnb_model_from_pretrained_args}
 
+
+    mm_model_config = MultiModalConfig(
+        model_name_or_path=model_args.model_name_or_path,
+        vision_tower=model_args.vision_tower,
+        mm_vision_select_layer=model_args.mm_vision_select_layer,
+        mm_projector_type=model_args.mm_projector_type,
+        pretrain_mm_mlp_adapter=model_args.pretrain_mm_mlp_adapter,
+        mm_use_im_start_end=model_args.mm_use_im_start_end,
+        mm_use_im_patch_token=model_args.mm_use_im_patch_token,
+        mm_vision_select_feature=model_args.mm_vision_select_feature,
+        llm_config_kwargs=llm_config_args
+    )
+    model = MultiModalModel(mm_model_config)
+
+    # TODO: confused about this
+    model.llm_model.config.use_cache = False
+
+    # TODO: make this a function
     if model_args.freeze_backbone:
-        model.model.requires_grad_(False)
+        model.llm_model.requires_grad_(False)
 
     if training_args.bits in [4, 8]:
         from peft import prepare_model_for_kbit_training
@@ -881,16 +867,7 @@ def train(USE_FLASH_ATTN_2=False):
         rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
 
-    # if llm_type == LlavaMetaModel.ModelType.LlavaMPTModel:
-    #     tokenizer = transformers.AutoTokenizer.from_pretrained(
-    #         model_args.model_name_or_path,
-    #         cache_dir=training_args.cache_dir,
-    #         model_max_length=training_args.model_max_length,
-    #         padding_side="right"
-    #     )
-    # else:
-    #print(model_args.model_name_or_path)
-    # --- TODO: add tokenizer to LlaVa class ---#
+    # --- TODO: create multimodal tokenizer class ---#
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
@@ -919,7 +896,8 @@ def train(USE_FLASH_ATTN_2=False):
     if model_args.vision_tower is not None:
         print(model_args)
         
-        model.get_model().initialize_vision_modules(
+        # TODO: again, do this in the initialization of multimodal_model
+        model.initialize_vision_modules(
             model_args=model_args,
             fsdp=training_args.fsdp
         )
@@ -945,6 +923,7 @@ def train(USE_FLASH_ATTN_2=False):
             raise NotImplementedError
         data_args.is_multimodal = True
 
+        # TODO: I don't know if this bit of code is being used. Regardless it shouldn't be done like this 
         model.config.image_aspect_ratio = data_args.image_aspect_ratio
         model.config.image_grid_pinpoints = data_args.image_grid_pinpoints
 
@@ -952,16 +931,16 @@ def train(USE_FLASH_ATTN_2=False):
         model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
         if model_args.tune_mm_mlp_adapter:
             model.requires_grad_(False)
-            for p in model.get_model().mm_projector.parameters():
+            for p in model.mm_projector.parameters():
                 p.requires_grad = True
 
         model.config.freeze_mm_mlp_adapter = training_args.freeze_mm_mlp_adapter
         if training_args.freeze_mm_mlp_adapter:
-            for p in model.get_model().mm_projector.parameters():
+            for p in model.mm_projector.parameters():
                 p.requires_grad = False
 
         if training_args.bits in [4, 8]:
-            model.get_model().mm_projector.to(dtype=compute_dtype, device=training_args.device)
+            model.mm_projector.to(dtype=compute_dtype, device=training_args.device)
 
         model.config.mm_use_im_start_end = data_args.mm_use_im_start_end = model_args.mm_use_im_start_end
         model.config.mm_projector_lr = training_args.mm_projector_lr
@@ -991,7 +970,7 @@ def train(USE_FLASH_ATTN_2=False):
 
 
     if training_args.finetune_ve:
-        for name, param in model.base_model.model.model.vision_tower.named_parameters():#This is required for lora, and training without lora will not work on this line.
+        for name, param in model.base_model.model.vision_encoder.named_parameters():#This is required for lora, and training without lora will not work on this line.
             param.requires_grad = True
     
     print(model)

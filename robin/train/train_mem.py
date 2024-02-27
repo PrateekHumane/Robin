@@ -4,7 +4,7 @@
 import os
 import sys
 sys.path.append('.')
-from robin.train.train import train
+from robin.train.train_mm import train
 
 USE_FLASH_ATTN_2 = False
 
