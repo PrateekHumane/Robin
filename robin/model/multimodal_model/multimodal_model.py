@@ -9,7 +9,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from robin.model.multimodal_encoder.builder import build_vision_tower
 from robin.model.multimodal_projector.builder import build_vision_projector
-from robin.model.language_model.builder import build_llm_model 
+from robin.model.language_model.builder import build_llm_model, LLMType
 from robin.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 
 class MultiModalConfig(PretrainedConfig):
@@ -20,22 +20,22 @@ class MultiModalConfig(PretrainedConfig):
     def __init__(
         self,
 
-        model_name_or_path: Optional[str] = field(default="facebook/opt-125m"),
-        llm_type: Optional[LlavaMetaModel.ModelType] = field(default=None),
-        version: Optional[str] = field(default="v0"),
-        freeze_backbone: bool = field(default=False),
-        tune_mm_mlp_adapter: bool = field(default=False),
-        vision_tower: Optional[str] = field(default=None),
-        mm_vision_select_layer: Optional[int] = field(default=-1),   # default to the last layer
-        pretrain_mm_mlp_adapter: Optional[str] = field(default=None),
-        mm_projector_type: Optional[str] = field(default='linear'),
-        mm_use_im_start_end: bool = field(default=False),
-        mm_use_im_patch_token: bool = field(default=True),
-        mm_vision_select_feature: Optional[str] = field(default="patch"),
+        model_name_or_path: Optional[str] = "facebook/opt-125m",
+        llm_type: Optional[str] = None,
+        version: Optional[str] = "v0",
+        freeze_backbone: bool = False,
+        tune_mm_mlp_adapter: bool = False,
+        vision_tower: Optional[str] = None,
+        mm_vision_select_layer: Optional[int] = -1,   # default to the last layer
+        pretrain_mm_mlp_adapter: Optional[str] = None,
+        mm_projector_type: Optional[str] = 'linear',
+        mm_use_im_start_end: bool = False,
+        mm_use_im_patch_token: bool = True,
+        mm_vision_select_feature: Optional[str] = "patch",
 
-        output_attentions: Optional[bool] = field(default=False),
-        output_hidden_states: Optional[bool] = field(default=False),
-        use_return_dict: Optional[bool] = field(default=True),
+        # output_attentions: Optional[bool] = False,
+        # output_hidden_states: Optional[bool] = False,
+        # use_return_dict: Optional[bool] = True,
 
         llm_config_kwargs=None,
         # llm_config: PretrainedConfig,
@@ -46,10 +46,12 @@ class MultiModalConfig(PretrainedConfig):
         
         # TODO set llm_config to a corresponding LLM class (e.g. MistralConfig) and save the config args there
         # llm_config_kwargs['pretrained_model_name_or_path'] = model_name_or_path
-        self.llm_model_name = model_name_or_path
-        self.llm_type= llm_type 
+        self.llm_model_name_or_path = model_name_or_path
+        # self.llm_type= LLMType(llm_type)
+        self.llm_type= llm_type
         self.llm_config = llm_config_kwargs
 
+        self.ve_model_name_or_path = vision_tower
         self.ve_config = {
             'vision_tower': vision_tower,
             'mm_vision_select_layer': mm_vision_select_layer,
@@ -58,16 +60,17 @@ class MultiModalConfig(PretrainedConfig):
         } 
 
         self.projector_config = {
-            'mm_projector_type': mm_projector_type,
-            'pretrain_mm_mlp_adapter': pretrain_mm_mlp_adapter,
+            'projector_type': mm_projector_type,
+            'tune_mm_mlp_adapter' : tune_mm_mlp_adapter,
+            # 'pretrain_mm_mlp_adapter': pretrain_mm_mlp_adapter,
             'mm_use_im_start_end': mm_use_im_start_end,
             'mm_use_im_patch_token': mm_use_im_patch_token,
         } 
 
         # these variables are used in self.config in the MultiModalModel
-        self.output_attentions = output_attentions
-        self.output_hidden_states = output_hidden_states
-        self.use_return_dict = use_return_dict
+        # self.output_attentions = output_attentions
+        # self.output_hidden_states = output_hidden_states
+        # self.use_return_dict = use_return_dict
 
         super().__init__(**kwargs)
 
@@ -75,22 +78,35 @@ class MultiModalConfig(PretrainedConfig):
 # TODO: rename this to RobinVLMModelForCausalLM and make MultiModalModel an abstract class
 class MultiModalModel(PreTrainedModel):
     config_class = MultiModalConfig
+    # TODO: MistralPretrainedModel Params
+    base_model_prefix = "model"
+    supports_gradient_checkpointing = True
+    # _no_split_modules = ["MistralDecoderLayer"]
+    _skip_keys_device_placement = "past_key_values"
+    _supports_flash_attn_2 = True
 
     def __init__(self, config, *args, **kwargs):
         # saves config in self.config
         super().__init__(config)
 
         # TODO: initialize but load the pretrained model in a different method
-        self.llm_model = build_llm_model(config.llm_model_name, config.llm_config)
+        self.llm_model = build_llm_model(config.llm_model_name_or_path, config.llm_config, config.llm_type)
         # TODO: should we load the vision tower model as well initialize_vision_modules -> vision_tower.load_model() -> .from_pretrained()
-        self.vision_encoder = build_vision_tower(config.ve_config, delay_load=True)
-        self.mm_projector = build_vision_projector(config.projector_config)
-
-        self.lm_head = nn.Linear(config.llm_config.hidden_size, config.llm_config.vocab_size, bias=False)
+        self.vision_encoder = build_vision_tower(config.ve_model_name_or_path, config.ve_config, delay_load=True)
 
         # TODO: remove these config sets and get attributes directly from llm_models where config. was used (or at least rename hidden_size to llm_hidden_size)
         # get the config up to date with some of the llm_model's config
-        self.config.hidden_size = self.llm_model.hidden_size
+        self.config.hidden_size = self.llm_model.config.hidden_size
+        # self.config.mm_hidden_size = self.vision_encoder.hidden_size
+        # TODO: should I concat self.llm_model.config with self.config.llm_config? Since config.llm_config is used to make self.llm_model.config maybe just use that moving forward
+        # self.config.llm_config = self.llm_model.config
+        
+        # TODO: build the vision_projector here! Don't do it in initialize_vision_modules. Remove that method
+        # self.mm_projector = build_vision_projector(self.config.mm_hidden_size, self.config.hidden_size, **config.projector_config)
+
+        self.lm_head = nn.Linear(self.llm_model.config.hidden_size, self.llm_model.config.vocab_size, bias=False)
+
+
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -141,8 +157,8 @@ class MultiModalModel(PreTrainedModel):
                 # FIXME: this is a hacky fix, for deepspeed zero3 to work
                 half_len = cur_input_ids.shape[0] // 2
                 cur_image_features = image_features[cur_image_idx]
-                cur_input_embeds_1 = self.llm_model.get_input_embeddings(cur_input_ids[:half_len])
-                cur_input_embeds_2 = self.llm_model.get_input_embeddings(cur_input_ids[half_len:])
+                cur_input_embeds_1 = self.llm_model.get_input_embeddings()(cur_input_ids[:half_len])
+                cur_input_embeds_2 = self.llm_model.get_input_embeddings()(cur_input_ids[half_len:])
                 cur_input_embeds = torch.cat([cur_input_embeds_1, cur_image_features[0:0], cur_input_embeds_2], dim=0)
                 new_input_embeds.append(cur_input_embeds)
                 if labels is not None:
@@ -159,17 +175,18 @@ class MultiModalModel(PreTrainedModel):
                 cur_image_features = image_features[cur_image_idx]
                 image_token_start = image_token_indices[0]
                 if getattr(self.config.projector_config, 'tune_mm_mlp_adapter', False) and getattr(self.config.projector_config, 'mm_use_im_start_end', False):
-                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings(cur_input_ids[:image_token_start-1]).detach())
-                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings(cur_input_ids[image_token_start-1:image_token_start]))
+                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings()(cur_input_ids[:image_token_start-1]).detach())
+                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings()(cur_input_ids[image_token_start-1:image_token_start]))
                     cur_new_input_embeds.append(cur_image_features)
-                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings(cur_input_ids[image_token_start+1:image_token_start+2]))
+                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings()(cur_input_ids[image_token_start+1:image_token_start+2]))
                     if labels is not None:
                         cur_new_labels.append(cur_labels[:image_token_start])
                         cur_new_labels.append(torch.full((cur_image_features.shape[0],), IGNORE_INDEX, device=labels.device, dtype=labels.dtype))
                         cur_new_labels.append(cur_labels[image_token_start:image_token_start+1])
                         cur_labels = cur_labels[image_token_start+2:]
                 else:
-                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings(cur_input_ids[:image_token_start]))
+                    print("input embeddings: ", image_token_start, cur_input_ids[:image_token_start])
+                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings()(cur_input_ids[:image_token_start]))
                     cur_new_input_embeds.append(cur_image_features)
                     if labels is not None:
                         cur_new_labels.append(cur_labels[:image_token_start])
@@ -183,9 +200,9 @@ class MultiModalModel(PreTrainedModel):
                 image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
             if cur_input_ids.numel() > 0:
                 if getattr(self.config.projector_config, 'tune_mm_mlp_adapter', False) and getattr(self.config.projector_config, 'mm_use_im_start_end', False):
-                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings(cur_input_ids).detach())
+                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings()(cur_input_ids).detach())
                 else:
-                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings(cur_input_ids))
+                    cur_new_input_embeds.append(self.llm_model.get_input_embeddings()(cur_input_ids))
                 if labels is not None:
                     cur_new_labels.append(cur_labels)
             cur_new_input_embeds = [x.to(device=self.device) for x in cur_new_input_embeds]
@@ -276,7 +293,7 @@ class MultiModalModel(PreTrainedModel):
             shift_labels = labels[..., 1:].contiguous()
             # Flatten the tokens
             loss_fct = CrossEntropyLoss()
-            shift_logits = shift_logits.view(-1, self.config.llm_config.vocab_size)
+            shift_logits = shift_logits.view(-1, self.llm_model.config.vocab_size)
             shift_labels = shift_labels.view(-1)
             # Enable model/pipeline parallelism
             shift_labels = shift_labels.to(shift_logits.device)
@@ -323,30 +340,34 @@ class MultiModalModel(PreTrainedModel):
         mm_vision_select_feature = model_args.mm_vision_select_feature
         pretrain_mm_mlp_adapter = model_args.pretrain_mm_mlp_adapter
 
-        self.config.ve_config.mm_vision_tower = vision_tower
+        # self.config.ve_config.mm_vision_tower = vision_tower
 
         if self.get_vision_tower() is None:
             vision_tower = build_vision_tower(model_args)
 
             if fsdp is not None and len(fsdp) > 0:
-                self.vision_tower = [vision_tower]
+                self.vision_encoder = [vision_tower]
             else:
-                self.vision_tower = vision_tower
+                self.vision_encoder = vision_tower
         else:
             if fsdp is not None and len(fsdp) > 0:
-                vision_tower = self.vision_tower[0]
+                vision_tower = self.vision_encoder[0]
             else:
-                vision_tower = self.vision_tower
+                vision_tower = self.vision_encoder
             vision_tower.load_model()
 
+        # TODO: add these to the correct subobject of MultiModalConfig config (projector_config, or ve_config)
         self.config.use_mm_proj = True
         self.config.mm_projector_type = getattr(model_args, 'mm_projector_type', 'linear')
         self.config.mm_hidden_size = vision_tower.hidden_size
         self.config.mm_vision_select_layer = mm_vision_select_layer
         self.config.mm_vision_select_feature = mm_vision_select_feature
 
+        print("VISION INIT UPDATED CONFIG:", self.config)
+
         if getattr(self, 'mm_projector', None) is None:
-            self.mm_projector = build_vision_projector(self.config)
+            print("BUILDING VISION PROJECTOR WITH:", self.config.mm_hidden_size, self.config.hidden_size, self.config.projector_config)
+            self.mm_projector = build_vision_projector(self.config.mm_hidden_size, self.config.hidden_size, **self.config.projector_config)
         else:
             # In case it is frozen by LoRA
             for p in self.mm_projector.parameters():
@@ -402,3 +423,25 @@ class MultiModalModel(PreTrainedModel):
                     p.requires_grad = False
                 for p in self.get_output_embeddings().parameters():
                     p.requires_grad = False
+
+    # TODO: these may be LLM dependent functions and thus need to be treated that way (For NEOX they are different)
+    # probably the best way to do this is to create a RobinLLMForCausalLMMixin base class, implement it for each LLM and include that
+    # ---------- MistralForCausalLM functions -----------#
+    def get_input_embeddings(self):
+        return self.llm_model.embed_tokens
+
+    def set_input_embeddings(self, value):
+        self.llm_model.embed_tokens = value
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def set_output_embeddings(self, new_embeddings):
+        self.lm_head = new_embeddings
+
+    def set_decoder(self, decoder):
+        self.llm_model = decoder
+
+    def get_decoder(self):
+        return self.llm_model
+    # ---------------------------------------------------#

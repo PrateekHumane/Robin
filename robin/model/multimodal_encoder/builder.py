@@ -4,8 +4,8 @@ from .open_clip import OpenCLIPVisionTower
 from .timm_vision import TimmVisionTower
 from .encoder_info import CLIP_COMPATIBLE_MODELS, OPENCLIP_CONFIG_MAP
 
-def build_vision_tower(vision_tower_cfg, **kwargs):
-    vision_tower = getattr(vision_tower_cfg, 'mm_vision_tower', getattr(vision_tower_cfg, 'vision_tower', None))
+def build_vision_tower(vision_tower, vision_tower_cfg, **kwargs):
+    # vision_tower = getattr(vision_tower_cfg, 'mm_vision_tower', getattr(vision_tower_cfg, 'vision_tower', None))
     
     if os.path.exists(vision_tower):
         name = vision_tower.split("/")[-1].lower()

@@ -829,8 +829,11 @@ def train(USE_FLASH_ATTN_2=False):
     )
     model = MultiModalModel(mm_model_config)
 
+    print("MODEL CONFIG AT THE START")
+    print(model.config)
+
     # TODO: confused about this
-    model.llm_model.config.use_cache = False
+    model.config.use_cache = False
 
     # TODO: make this a function
     if model_args.freeze_backbone:
@@ -927,8 +930,10 @@ def train(USE_FLASH_ATTN_2=False):
         model.config.image_aspect_ratio = data_args.image_aspect_ratio
         model.config.image_grid_pinpoints = data_args.image_grid_pinpoints
 
-        # TODO: all of the freezing and requires grad should be in the class
+        # TODO: remove direct config sets
         model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
+
+        # TODO: all of the freezing and requires grad should be in the class
         if model_args.tune_mm_mlp_adapter:
             model.requires_grad_(False)
             for p in model.mm_projector.parameters():
@@ -963,6 +968,10 @@ def train(USE_FLASH_ATTN_2=False):
 
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
+
+    print("MODEL CONFIG BEFORE TRAIN")
+    print(model.config)
+
     trainer = LLaVATrainer(model=model,
                     tokenizer=tokenizer,
                     args=training_args,

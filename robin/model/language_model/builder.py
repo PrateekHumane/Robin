@@ -21,20 +21,20 @@ def get_model_type_from_model_name(model_name: str) -> LLMType:
 def get_model_type_list(cls):
     return [m.value for m in LLMType]
 
-def build_llm_model(llm_config, **kwargs):
+def build_llm_model(model_name_or_path, llm_config, llm_type=None,  **kwargs):
     # register llm_type from Enum
-    if llm_config.llm_type is not None:
+    if llm_type is not None:
         try:
-            llm_type = LLMType(llm_config.llm_type)
+            llm_type = LLMType(llm_type)
         except KeyError as e:
             raise ValueError(f"Invalid llm type provided {e}. Supported llm classes are {', '.join(get_model_type_list())}")
     else:
-        llm_type = get_model_type_from_model_name(llm_config.model_name)
+        llm_type = get_model_type_from_model_name(model_name_or_path)
 
 
     if llm_type == LLMType.MISTRAL:
         return MistralModel.from_pretrained(
-            llm_config.model_name_or_path,
+            model_name_or_path,
             **llm_config
             # cache_dir=llm_config.training_args.cache_dir,
             # use_flash_attention_2 = llm_config.USE_FLASH_ATTN_2,
@@ -42,7 +42,7 @@ def build_llm_model(llm_config, **kwargs):
         )
     elif llm_type == LLMType.NEOX:
         return GPTNeoXModel.from_pretrained(
-            llm_config.model_name_or_path,
+            model_name_or_path,
             **llm_config
             # cache_dir=training_args.cache_dir,
             # use_flash_attention_2 = USE_FLASH_ATTN_2, # The current architecture does not support Flash Attention 2.0
@@ -50,7 +50,7 @@ def build_llm_model(llm_config, **kwargs):
         )
     elif llm_type == LLMType.LLAMA:
         return LlamaModel.from_pretrained(
-            llm_config.model_name_or_path,
+            model_name_or_path,
             **llm_config
             # cache_dir=training_args.cache_dir,
             # **bnb_model_from_pretrained_args,
