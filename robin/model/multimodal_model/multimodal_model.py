@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 
-from transformers import PretrainedConfig, PreTrainedModel
+from transformers import PretrainedConfig, PreTrainedModel, AutoConfig, AutoModelForCausalLM
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from robin.model.multimodal_encoder.builder import build_vision_tower
@@ -20,6 +20,7 @@ class MultiModalConfig(PretrainedConfig):
     def __init__(
         self,
 
+        # TODO: rename to llm_model_name_or_path
         model_name_or_path: Optional[str] = "facebook/opt-125m",
         llm_type: Optional[str] = None,
         version: Optional[str] = "v0",
@@ -445,3 +446,7 @@ class MultiModalModel(PreTrainedModel):
     def get_decoder(self):
         return self.llm_model
     # ---------------------------------------------------#
+
+
+# AutoConfig.register("multimodal", MultiModalConfig)
+# AutoModelForCausalLM.register(MultiModalConfig, MultiModalModel)

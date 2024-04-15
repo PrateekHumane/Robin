@@ -3,7 +3,7 @@ import torch
 
 from robin.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from robin.conversation import conv_templates, SeparatorStyle
-from robin.model.builder import load_pretrained_model, LlavaMetaModel
+from robin.model.builder_mm import load_pretrained_model
 
 from robin.utils import disable_torch_init
 from robin.mm_utils import process_images, tokenizer_image_token, get_model_name_from_path, KeywordsStoppingCriteria
@@ -103,7 +103,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-path", type=str, default="agi-collective/mistral-7b-oh-siglip-so400m-finetune-lora")
     parser.add_argument("--model-base", type=str, default="teknium/OpenHermes-2.5-Mistral-7B")
-    parser.add_argument("--llm-type", type=str, default=None, choices=LlavaMetaModel.get_model_type_list())
+    # parser.add_argument("--llm-type", type=str, default=None, choices=LlavaMetaModel.get_model_type_list())
     parser.add_argument("--image-file", type=str, required=True)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--conv-mode", type=str, default="vicuna_v1")
