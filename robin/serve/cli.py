@@ -33,7 +33,7 @@ def main(args):
 
     model_name = get_model_name_from_path(args.model_path)
 
-    tokenizer, model, image_processor, context_len = load_pretrained_model(args.model_path, args.model_base, model_name, args.llm_type ,args.load_8bit, args.load_4bit, device=args.device)
+    tokenizer, model, image_processor, context_len = load_pretrained_model(args.model_path, args.model_base, model_name, args.load_8bit, args.load_4bit, device=args.device)
 
     conv = conv_templates[args.conv_mode].copy()
     roles = conv.roles
