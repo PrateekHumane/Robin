@@ -25,7 +25,7 @@ class OpenCLIPVisionTower(nn.Module):
         
         # self.hidden_size = 1152 if "SO400M" in self.vision_tower_name else 768  # TODO: this is a hack, we should read this from config.embed_dim
 
-        self.device = None
+        # self.device = None
         self.dtype = None
         
     def load_model(self):
@@ -76,6 +76,7 @@ class OpenCLIPVisionTower(nn.Module):
 
     # @torch.no_grad()
     def forward(self, images): # shape, CLS shape, image tokens shape, and hidden size
+        print("OPEN CLIP DEVICE:", self.device)
         
         if type(images) is list:
             image_features = []
@@ -98,9 +99,9 @@ class OpenCLIPVisionTower(nn.Module):
     # def dtype(self):
     #     return next(self.vision_tower.parameters()).dtype
 
-    # @property
-    # def device(self):
-    #     return next(self.vision_tower.parameters()).device
+    @property
+    def device(self):
+        return next(self.vision_tower.parameters()).device
 
     @property
     def config(self):

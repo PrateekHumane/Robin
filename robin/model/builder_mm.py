@@ -29,13 +29,17 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
     if 'lora' in model_name.lower() and model_base is None:
         warnings.warn('There is `lora` in model name but no `model_base` is provided. If you are loading a LoRA model, please provide the `model_base` argument. Detailed instruction: https://github.com/haotian-liu/LLaVA#launch-a-model-worker-lora-weights-unmerged.')
         
-    lora_cfg_pretrained = AutoConfig.from_pretrained(model_path)
+    lora_cfg_pretrained = MultiModalConfig.from_pretrained(model_path)
     print("CONFIG:", lora_cfg_pretrained)
     tokenizer = AutoTokenizer.from_pretrained(model_base)
     print('Loading LLaVA from base model...')
 
-    model = MultiModalModel.from_pretrained(model_base, low_cpu_mem_usage=True, config=lora_cfg_pretrained, **kwargs)
+    # WHY MODEL BASE??
+    # model = MultiModalModel.from_pretrained(model_path, low_cpu_mem_usage=True, config=lora_cfg_pretrained, **kwargs)
+    model = MultiModalModel(config=lora_cfg_pretrained, **kwargs)
     
+    print(model.mm_projector)
+
     token_num, tokem_dim = model.lm_head.out_features, model.lm_head.in_features
     if model.lm_head.weight.shape[0] != token_num:
         model.lm_head.weight = torch.nn.Parameter(torch.empty(token_num, tokem_dim, device=model.device, dtype=model.dtype))
@@ -69,15 +73,27 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
     model = model.merge_and_unload()
     print('Model is loaded...')
 
+    print(model.mm_projector)
+    for idx, module in enumerate(model.mm_projector):
+        if isinstance(module, torch.nn.Linear):
+            print(f"Linear Layer {idx} Weights:")
+            print(module.weight)
+
     image_processor = None
 
-    mm_use_im_start_end = getattr(model.config, "mm_use_im_start_end", False)
-    mm_use_im_patch_token = getattr(model.config, "mm_use_im_patch_token", True)
+    mm_use_im_start_end = getattr(model.config.projector_config, "mm_use_im_start_end", False)
+    mm_use_im_patch_token = getattr(model.config.projector_config, "mm_use_im_patch_token", True)
     if mm_use_im_patch_token:
         tokenizer.add_tokens([DEFAULT_IMAGE_PATCH_TOKEN], special_tokens=True)
     if mm_use_im_start_end:
         tokenizer.add_tokens([DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN], special_tokens=True)
     model.resize_token_embeddings(len(tokenizer))
+
+    print("MODEL STUFF HERE:")
+    print(model.vision_encoder)
+    print(model.vision_encoder.is_loaded)
+    print(model.vision_encoder.vision_tower_name)
+    model.to(device=device, dtype=torch.float16)
 
     #This actually adds the vision tower to the model.
     vision_tower = model.get_vision_tower()
@@ -86,6 +102,11 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
     # TODO: either explicilty load llm and vision tower or remove next lines and implictly load both 
     if not vision_tower.is_loaded:
         vision_tower.load_model()
+
+    print(vision_tower)
+    print(vision_tower.is_loaded)
+    print(vision_tower.vision_tower_name)
+    print(vision_tower.image_processor)
     
     vision_tower.to(device=device, dtype=torch.float16)
     image_processor = vision_tower.image_processor        
@@ -94,7 +115,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
     if finetuned_ve:
         
         if os.path.exists(os.path.join(model_path, 'non_lora_trainables.bin')):
-            print("Found lora_trainables")
+            print("Found lora_trainables (FINTUNED VE)")
             original_weights = torch.load(os.path.join(model_path, 'non_lora_trainables.bin'))
         else:
             # this is probably from HF Hub
@@ -107,6 +128,7 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                 return torch.load(cache_file)
             original_weights = load_from_hf(model_path, 'non_lora_trainables.bin')
 
+        print(original_weights.keys())
         #Convert names
         new_weights = {}
         for key in original_weights.keys():
@@ -119,11 +141,21 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         projection = {}
         projections = ["base_model.model.mm_projector.0.weight", "base_model.model.mm_projector.0.bias", "base_model.model.mm_projector.2.weight", "base_model.model.mm_projector.2.bias"]
         for key in projections:
-            projection[key] = new_weights.pop(key)
+            projection[str(key).replace("base_model.model.mm_projector.","")] = new_weights.pop(key)
         
         
         result = vision_tower.load_state_dict(new_weights, strict = True)   
         print("Loading strict resuts:", result)
+
+        result2 = model.mm_projector.load_state_dict(projection, strict = True)   
+        print("Loading strict resuts projector:", result2)
+
+    print(model.mm_projector)
+    for idx, module in enumerate(model.mm_projector):
+        if isinstance(module, torch.nn.Linear):
+            print(f"Linear Layer {idx} Weights:")
+            print(module.weight)
+
         
     if hasattr(model.config, "max_sequence_length"):
         context_len = model.config.max_sequence_length

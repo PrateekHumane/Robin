@@ -82,7 +82,8 @@ class MultiModalModel(PreTrainedModel):
     # TODO: MistralPretrainedModel Params
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
-    # _no_split_modules = ["MistralDecoderLayer"]
+    # TODO: add all split modules
+    _no_split_modules = ["MistralDecoderLayer"]
     _skip_keys_device_placement = "past_key_values"
     _supports_flash_attn_2 = True
 
@@ -102,8 +103,10 @@ class MultiModalModel(PreTrainedModel):
         # TODO: should I concat self.llm_model.config with self.config.llm_config? Since config.llm_config is used to make self.llm_model.config maybe just use that moving forward
         # self.config.llm_config = self.llm_model.config
         
+        # TODO: NEED TO BE ABLE TO RUN THIS 
+        # print('CONFIG BEFORE PROJ SET', self.config)
         # TODO: build the vision_projector here! Don't do it in initialize_vision_modules. Remove that method
-        # self.mm_projector = build_vision_projector(self.config.mm_hidden_size, self.config.hidden_size, **config.projector_config)
+        #self.mm_projector = build_vision_projector(self.config.mm_hidden_size, self.config.hidden_size, **config.projector_config)
 
         self.lm_head = nn.Linear(self.llm_model.config.hidden_size, self.llm_model.config.vocab_size, bias=False)
 

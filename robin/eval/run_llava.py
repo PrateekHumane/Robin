@@ -5,7 +5,7 @@ from robin.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_S
 from robin.conversation import conv_templates, SeparatorStyle
 from robin.model.builder_mm import load_pretrained_model
 from robin.utils import disable_torch_init
-from robin.mm_utils import tokenizer_image_token, get_model_name_from_path, KeywordsStoppingCriteria
+from robin.mm_utils import process_images, tokenizer_image_token, get_model_name_from_path, KeywordsStoppingCriteria
 
 from PIL import Image
 
@@ -31,7 +31,8 @@ def eval_model(args):
     tokenizer, model, image_processor, context_len = load_pretrained_model(args.model_path, args.model_base, model_name)
 
     qs = args.query
-    if model.config.mm_use_im_start_end:
+
+    if model.config.projector_config['mm_use_im_start_end']:
         qs = DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN + '\n' + qs
     else:
         qs = DEFAULT_IMAGE_TOKEN + '\n' + qs
@@ -56,7 +57,12 @@ def eval_model(args):
     prompt = conv.get_prompt()
 
     image = load_image(args.image_file)
-    image_tensor = image_processor.preprocess(image, return_tensors='pt')['pixel_values'].half().cuda()
+    image_tensor = process_images([image], image_processor, args)
+    if type(image_tensor) is list:
+        image_tensor = [image.to(model.device, dtype=torch.float16) for image in image_tensor]
+    else:
+        image_tensor = image_tensor.to(model.device, dtype=torch.float16)
+
 
     input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
 
